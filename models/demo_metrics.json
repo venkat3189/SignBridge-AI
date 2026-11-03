@@ -1,0 +1,14 @@
+{
+  "signs": [
+    "Good night",
+    "Hello",
+    "How are you",
+    "I",
+    "Thank you",
+    "you"
+  ],
+  "n_test": 19,
+  "baseline_accuracy": 0.42105263157894735,
+  "personalised_accuracy": 1.0,
+  "note": "Test clips were recorded by the same person in the same session as the training clips, so the personalised score is optimistic and is not a generalisation claim. The original-model score shows how the INCLUDE-trained model behaves on this webcam."
+}

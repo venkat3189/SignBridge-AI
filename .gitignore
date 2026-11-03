@@ -1,0 +1,44 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.log
+*.tmp
+temp/
+tmp/
+
+# Dataset files - keep large/raw datasets out of GitHub
+data/raw/
+data/videos/
+*.mp4
+*.avi
+*.mov
+
+# Test and coverage files
+.pytest_cache/
+.coverage
+htmlcov/
