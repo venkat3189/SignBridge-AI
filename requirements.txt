@@ -5,7 +5,7 @@ pandas==2.2.2
 scikit-learn==1.5.2
 tensorflow-cpu==2.16.2
 keras==3.5.0
-streamlit==1.39.0
+streamlit==1.40.0
 plotly==5.24.1
 joblib==1.4.2
 pyttsx3==2.98

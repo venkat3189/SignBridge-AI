@@ -8,26 +8,47 @@ Layout of the vector:
 Each hand block = 42 body-relative coords + 42 hand-shape coords (wrist-relative).
 Missing hands are zeros. Frames must NOT be mirrored (training videos are not).
 """
+from collections.abc import Sequence
+from typing import Protocol, cast
+
 import numpy as np
-import mediapipe as mp
+from mediapipe.python.solutions import hands as mp_hands, pose as mp_pose
 
 from src.config import POSE_IDS, N_POSE_FEATURES, HAND_FEATURES, FEATURE_DIM, ACTIVE_WRIST_Y
 
 
+class _Landmark(Protocol):
+    x: float
+    y: float
+    visibility: float
+
+
+class _LandmarkList(Protocol):
+    landmark: Sequence[_Landmark]
+
+
+class _HandsResult(Protocol):
+    multi_hand_landmarks: Sequence[_LandmarkList] | None
+
+
+class _PoseResult(Protocol):
+    pose_landmarks: _LandmarkList | None
+
+
 class LandmarkExtractor:
     def __init__(self, static_image_mode=True, hands_complexity=1, pose_complexity=0):
-        self._hands = mp.solutions.hands.Hands(
+        self._hands = mp_hands.Hands(
             static_image_mode=static_image_mode, max_num_hands=2,
             model_complexity=hands_complexity,
             min_detection_confidence=0.5, min_tracking_confidence=0.5)
-        self._pose = mp.solutions.pose.Pose(
+        self._pose = mp_pose.Pose(
             static_image_mode=static_image_mode, model_complexity=pose_complexity,
             min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
     def process(self, rgb):
         """Returns (features[182], info). info has raw results for drawing."""
-        pose_res = self._pose.process(rgb)
-        hands_res = self._hands.process(rgb)
+        pose_res = cast(_PoseResult, self._pose.process(rgb))
+        hands_res = cast(_HandsResult, self._hands.process(rgb))
 
         center = np.array([0.5, 0.5])
         scale = 0.3

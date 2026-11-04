@@ -65,7 +65,7 @@ def augment(X, y, copies=4):
 
 def train_gru(Xtr, ytr, Xva, yva, n_classes, epochs):
     import tensorflow as tf
-    from tensorflow import keras
+    import keras
     tf.random.set_seed(SEED)
     model = keras.Sequential([
         keras.layers.Input((Xtr.shape[1], Xtr.shape[2])),
@@ -83,7 +83,7 @@ def train_gru(Xtr, ytr, Xva, yva, n_classes, epochs):
                                         patience=15, restore_best_weights=True)]
     Xa, ya = augment(Xtr, ytr)
     model.fit(Xa, ya, validation_data=(Xva, yva) if has_val else None,
-              epochs=epochs, batch_size=32, callbacks=cb, verbose=2)
+              epochs=epochs, batch_size=32, callbacks=cb, verbose="2")
     return model
 
 
@@ -162,7 +162,7 @@ def main():
         t = time.time()
         gru = train_gru(Xn[tr], y[tr], Xn[va], y[va], n_classes, args.epochs)
         train_s = time.time() - t
-        proba = gru.predict(Xn[te], verbose=0)
+        proba = gru.predict(Xn[te], verbose="0")
         pred = proba.argmax(axis=1)
         m = scores(y[te], pred, n_classes)
         m["train_seconds"] = train_s

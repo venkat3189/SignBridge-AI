@@ -36,3 +36,10 @@ SELECTED_SIGNS = {
     ],
 }
 ALL_SIGNS = [s for signs in SELECTED_SIGNS.values() for s in signs]
+
+# Extra sentence-making words. INCLUDE (as downloaded) has no verbs, so these are
+# recorded with your own webcam via scripts/record_samples.py and used only by the
+# Personalised model. Verify each sign against the ISLRTC dictionary / Sign Learn app
+# or a qualified signer before presenting it as valid ISL.
+CUSTOM_SIGNS = ["Help", "Need", "Want", "Water", "Food", "Doctor", "Yes", "No"]
+RECORDABLE_SIGNS = ALL_SIGNS + CUSTOM_SIGNS

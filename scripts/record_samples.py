@@ -16,10 +16,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import cv2
-import mediapipe as mp
 import numpy as np
+from mediapipe.python.solutions import drawing_utils, hands, pose
 
-from src.config import ALL_SIGNS, SELF_DIR
+from src.config import RECORDABLE_SIGNS, SELF_DIR
 from src.confidence_filter import SignSegmenter
 from src.data_preprocessing import sanitize
 from src.hand_tracking import LandmarkExtractor
@@ -28,13 +28,13 @@ BLUE = (255, 99, 37)  # BGR
 
 
 def draw_landmarks(frame, info):
-    draw = mp.solutions.drawing_utils
+    draw = drawing_utils
     if info["pose"]:
-        draw.draw_landmarks(frame, info["pose"], mp.solutions.pose.POSE_CONNECTIONS,
+        draw.draw_landmarks(frame, info["pose"], list(pose.POSE_CONNECTIONS),
                             draw.DrawingSpec(color=(190, 190, 190), thickness=1, circle_radius=1),
                             draw.DrawingSpec(color=(210, 210, 210), thickness=1))
     for hl in info["hands"] or []:
-        draw.draw_landmarks(frame, hl, mp.solutions.hands.HAND_CONNECTIONS,
+        draw.draw_landmarks(frame, hl, list(hands.HAND_CONNECTIONS),
                             draw.DrawingSpec(color=BLUE, thickness=2, circle_radius=3),
                             draw.DrawingSpec(color=(255, 255, 255), thickness=2))
 
@@ -52,10 +52,10 @@ def main():
     args = ap.parse_args()
 
     signs = [s.strip() for s in args.signs.split(",") if s.strip()]
-    unknown = [s for s in signs if s not in ALL_SIGNS]
+    unknown = [s for s in signs if s not in RECORDABLE_SIGNS]
     if unknown:
         print("Unknown sign name(s):", unknown)
-        print("Valid names:", ALL_SIGNS)
+        print("Valid names:", RECORDABLE_SIGNS)
         return 1
 
     SELF_DIR.mkdir(parents=True, exist_ok=True)

@@ -6,8 +6,8 @@ import streamlit as st
 
 from database import db
 from dashboard import ui
-from src import speech_output
-from src.config import ALL_SIGNS
+from src import ai_polish, speech_output
+from src.config import RECORDABLE_SIGNS
 from src.confidence_filter import SignSegmenter, accept
 from src.sentence_builder import build_sentence
 
@@ -63,13 +63,21 @@ def panel_html(status_key, seg_frames=0, thr=0.20):
     if status_key == "signing":
         text = f"Reading sign… ({seg_frames} frames)"
     words = st.session_state.words
-    sentence = build_sentence(words) or "—"
+    sentence = build_sentence(words, question=st.session_state.get("as_question", False)) or "—"
     top3 = ""
     if last:
         top3 = " · ".join(f"{ui.esc(n)} {p * 100:.0f}%" for n, p in last["top3"])
         if not last["accepted"]:
             top3 += f'<br><span style="color:#B42318">Below threshold ({thr * 100:.0f}%), so it was not added.</span>'
     conf_line = f"{conf * 100:.0f}% confidence{ms}"
+    pol = st.session_state.get("polished")
+    ai_html = ""
+    if pol and pol["key"] == (tuple(words), bool(st.session_state.get("as_question", False))):
+        if pol["used_ai"]:
+            ai_html = (f'<div class="eyebrow" style="margin-top:1.1rem">AI-polished</div>'
+                       f'<div class="sentence" style="color:#2F5BFF">{ui.esc(pol["text"])}</div>')
+        elif pol["message"]:
+            ai_html = f'<div class="conf-text" style="margin-top:.8rem">{ui.esc(pol["message"])}</div>'
     chips = ui.chips(words, blue=True) if words else '<span style="color:#9A9A94">No words yet</span>'
     return (f'<div class="panel"><div class="eyebrow">Recognised sign</div>'
             f'<div class="big-sign">{ui.esc(label)}</div>'
@@ -78,18 +86,19 @@ def panel_html(status_key, seg_frames=0, thr=0.20):
             f'{"<br>Top 3: " + top3 if top3 else ""}</div>'
             f'<div class="status {cls}">{ui.esc(text)}</div>'
             f'<div class="eyebrow">Translation buffer</div><div style="margin-bottom:1rem">{chips}</div>'
-            f'<div class="eyebrow">Sentence</div><div class="sentence">{ui.esc(sentence)}</div></div>')
+            f'<div class="eyebrow">Sentence</div><div class="sentence">{ui.esc(sentence)}</div>{ai_html}</div>')
 
 
 def _draw(frame, info):
-    import mediapipe as mp
-    draw = mp.solutions.drawing_utils
+    from mediapipe.python.solutions import drawing_utils, hands, pose
+
+    draw = drawing_utils
     if info["pose"]:
-        draw.draw_landmarks(frame, info["pose"], mp.solutions.pose.POSE_CONNECTIONS,
+        draw.draw_landmarks(frame, info["pose"], list(pose.POSE_CONNECTIONS),
                             draw.DrawingSpec(color=(190, 190, 190), thickness=1, circle_radius=1),
                             draw.DrawingSpec(color=(210, 210, 210), thickness=1))
     for hl in info["hands"] or []:
-        draw.draw_landmarks(frame, hl, mp.solutions.hands.HAND_CONNECTIONS,
+        draw.draw_landmarks(frame, hl, list(hands.HAND_CONNECTIONS),
                             draw.DrawingSpec(color=(255, 99, 37), thickness=2, circle_radius=3),
                             draw.DrawingSpec(color=(255, 255, 255), thickness=2))
 
@@ -119,8 +128,19 @@ def render(predictor):
         speak_clicked = b1.button("Speak", type="primary", use_container_width=True)
         b2.button("Undo", on_click=_undo, use_container_width=True)
         b3.button("Clear", on_click=_clear, use_container_width=True)
+        st.toggle("Ask as a question", key="as_question",
+                  help="Sign language marks questions with facial expression, which this app does not read. Switch this on to phrase the sentence as a question.")
+        polish_clicked = st.button("Polish with AI", use_container_width=True,
+                                   help="Optional. Sends only the recognised words (text) to an AI service. Needs internet.")
+        with st.expander("AI sentence polish (optional)"):
+            st.selectbox("Provider", ["Anthropic (Claude)", "OpenAI-compatible"], key="ai_provider")
+            st.text_input("API key", type="password", key="ai_key",
+                          help="Kept only in this browser session. You can also set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+            st.text_input("Model (optional)", key="ai_model", placeholder="leave empty for the default")
+            st.caption("Only the recognised words are sent as text. Video never leaves your computer. "
+                       "The AI may only rephrase; replies that add or drop signed words are rejected.")
         with st.expander("Correct or add a word"):
-            st.selectbox("Word", ALL_SIGNS, key="manual_word")
+            st.selectbox("Word", RECORDABLE_SIGNS, key="manual_word")
             st.button("Add word", on_click=_add_manual)
         voices = get_voices()
         voice_id = None
@@ -128,9 +148,23 @@ def render(predictor):
             names = [n for _, n in voices]
             voice_id = voices[names.index(st.selectbox("Voice", names, key="voice"))][0]
 
+    if polish_clicked:
+        q = bool(st.session_state.get("as_question", False))
+        words = list(st.session_state.words)
+        with st.spinner("Polishing…"):
+            res = ai_polish.polish(words, build_sentence(words, question=q), q,
+                                   st.session_state.get("ai_provider", "Anthropic (Claude)"),
+                                   st.session_state.get("ai_key", ""), st.session_state.get("ai_model", ""))
+        res["key"] = (tuple(words), q)
+        st.session_state["polished"] = res
+        st.toast(res["message"] or "Done.")
+
     if speak_clicked:
         words = st.session_state.words
-        sentence = build_sentence(words)
+        sentence = build_sentence(words, question=st.session_state.get("as_question", False))
+        pol = st.session_state.get("polished")
+        if pol and pol["used_ai"] and pol["key"] == (tuple(words), bool(st.session_state.get("as_question", False))):
+            sentence = pol["text"]
         if not words:
             st.toast("Nothing to speak yet.")
         else:
@@ -165,8 +199,8 @@ def render(predictor):
             vec, info = extractor.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             seq = seg.update(vec, info["active"])
             _draw(frame, info)
-            frame_ph.image(cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
-
+            frame_ph.image(cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            time.sleep(0.03)
             if seq is not None:
                 res = predictor.predict(seq, model)
                 res["accepted"] = accept(res, threshold)

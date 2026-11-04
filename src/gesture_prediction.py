@@ -13,6 +13,7 @@ class GesturePredictor:
     def __init__(self):
         labels_path = MODELS_DIR / "labels.json"
         self.classes = json.loads(labels_path.read_text()) if labels_path.exists() else []
+        self.base_classes = list(self.classes)
         self.models = {}
         self.load_errors = {}
         for key, name, fname in (("Random Forest", "rf", "static_model.pkl"), ("SVM", "svm", "svm_model.pkl")):
@@ -29,13 +30,16 @@ class GesturePredictor:
                 obj = joblib.load(demo_path)
                 self.models["Personalised"] = obj["model"]
                 self._demo_classes = obj["classes"]
+                for c in self._demo_classes:          # custom words that only this model knows
+                    if c not in self.classes:
+                        self.classes.append(c)
             except Exception as exc:
                 self.load_errors["Personalised"] = str(exc)
         gru_path = DYNAMIC_DIR / "gru.keras"
         stats_path = MODELS_DIR / "norm_stats.npz"
         if gru_path.exists() and stats_path.exists():
             try:
-                from tensorflow import keras
+                import keras
                 self.models["GRU"] = keras.models.load_model(gru_path)
                 stats = np.load(stats_path)
                 self._mean, self._std = stats["mean"], stats["std"]
@@ -57,7 +61,9 @@ class GesturePredictor:
         n = len(self.classes)
         if name == "GRU":
             x = ((seq - self._mean) / self._std).astype(np.float32)[None]
-            return np.asarray(self.models["GRU"](x, training=False))[0]
+            out = np.zeros(n)
+            out[: len(self.base_classes)] = np.asarray(self.models["GRU"](x, training=False))[0]
+            return out
         model = self.models[name]
         out = np.zeros(n)
         if name == "Personalised":
@@ -69,7 +75,7 @@ class GesturePredictor:
         out[model.classes_] = model.predict_proba(agg)[0]
         return out
 
-    def predict(self, seq, model="Ensemble"):
+    def predict(self, seq, model="Random Forest"):
         t = time.perf_counter()
         seq = np.asarray(seq, dtype=np.float32)
         agg = aggregate_features(seq)

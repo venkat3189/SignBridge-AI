@@ -5,6 +5,8 @@ Add --camera to also test the webcam.
 import sys
 import sqlite3
 import importlib
+from collections.abc import Mapping
+from typing import Any, cast
 
 results = []
 
@@ -27,16 +29,18 @@ def version_of(module_name):
 def test_mediapipe():
     import mediapipe as mp
     import numpy as np
+    from mediapipe.python.solutions import holistic
+
     # Uses the legacy 'solutions' API, which this project depends on.
-    with mp.solutions.holistic.Holistic(static_image_mode=True) as holistic:
+    with holistic.Holistic(static_image_mode=True) as model:
         blank = np.zeros((480, 640, 3), dtype=np.uint8)
-        holistic.process(blank)
+        model.process(blank)
     return f"Holistic OK (mediapipe {mp.__version__})"
 
 
 def test_tensorflow():
     import tensorflow as tf
-    from tensorflow import keras
+    import keras
     model = keras.Sequential([keras.layers.Input((30, 10)), keras.layers.GRU(8),
                               keras.layers.Dense(3, activation="softmax")])
     return f"TF {tf.__version__}, Keras {keras.__version__}, GRU model builds ({model.count_params()} params)"
@@ -52,7 +56,8 @@ def test_tts():
 
 def test_audio():
     import sounddevice as sd
-    inputs = [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
+    devices = cast(list[Mapping[str, Any]], sd.query_devices())
+    inputs = [d["name"] for d in devices if d["max_input_channels"] > 0]
     if not inputs:
         raise RuntimeError("No microphone found")
     return f"{len(inputs)} input device(s), e.g. {inputs[0]}"

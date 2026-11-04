@@ -1,18 +1,96 @@
 
-"""Local speech-to-text using SoundDevice and Faster-Whisper."""
+"""Speech-to-text using browser audio and Faster-Whisper."""
 
+import io
+import wave
 import time
+from collections.abc import Mapping
+from typing import Any, cast
+
 import numpy as np
 
 SAMPLE_RATE = 16000
 _model = None
 
 
+def decode_audio(uploaded_file):
+    """Convert browser-recorded WAV audio into a 16 kHz mono float array."""
+
+    try:
+        with wave.open(io.BytesIO(uploaded_file.getvalue()), "rb") as wav:
+            channels = wav.getnchannels()
+            sample_width = wav.getsampwidth()
+            original_rate = wav.getframerate()
+            frames = wav.readframes(wav.getnframes())
+
+        if sample_width == 1:
+            audio = (
+                np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+                - 128
+            ) / 128.0
+
+        elif sample_width == 2:
+            audio = (
+                np.frombuffer(frames, dtype="<i2").astype(np.float32)
+                / 32768.0
+            )
+
+        elif sample_width == 3:
+            raw = np.frombuffer(frames, dtype=np.uint8)
+            raw = raw.reshape(-1, 3)
+
+            values = (
+                raw[:, 0].astype(np.int32)
+                | (raw[:, 1].astype(np.int32) << 8)
+                | (raw[:, 2].astype(np.int32) << 16)
+            )
+
+            values = (values ^ 0x800000) - 0x800000
+            audio = values.astype(np.float32) / 8388608.0
+
+        elif sample_width == 4:
+            audio = (
+                np.frombuffer(frames, dtype="<i4").astype(np.float32)
+                / 2147483648.0
+            )
+
+        else:
+            raise ValueError("Unsupported audio format.")
+
+        if channels > 1:
+            audio = audio.reshape(-1, channels).mean(axis=1)
+
+        # Convert to the 16 kHz sample rate expected by Whisper.
+        if original_rate != SAMPLE_RATE:
+            new_length = int(
+                len(audio) * SAMPLE_RATE / original_rate
+            )
+
+            old_positions = np.arange(len(audio))
+            new_positions = np.linspace(
+                0, len(audio) - 1, new_length
+            )
+
+            audio = np.interp(
+                new_positions,
+                old_positions,
+                audio
+            ).astype(np.float32)
+
+        return audio.astype(np.float32)
+
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not process recorded audio: {exc}"
+        ) from exc
+
+
 def get_microphone():
-    """Check whether an input microphone is available."""
+    """Check whether a local microphone is available."""
     import sounddevice as sd
 
-    devices = sd.query_devices()
+    devices = cast(list[Mapping[str, Any]], sd.query_devices())
+
     inputs = [
         (index, device)
         for index, device in enumerate(devices)
@@ -20,15 +98,13 @@ def get_microphone():
     ]
 
     if not inputs:
-        raise RuntimeError(
-            "No microphone detected. Connect or enable a microphone."
-        )
+        raise RuntimeError("No microphone detected.")
 
     return inputs
 
 
 def record(seconds=5, status_callback=None):
-    """Record audio from the default microphone."""
+    """Record audio using SoundDevice for local use only."""
     import sounddevice as sd
 
     get_microphone()
@@ -44,8 +120,7 @@ def record(seconds=5, status_callback=None):
 
         if status_callback:
             recorded = sum(len(chunk) for chunk in chunks)
-            progress = min(recorded / total_samples, 1.0)
-            status_callback(progress)
+            status_callback(min(recorded / total_samples, 1.0))
 
     try:
         with sd.InputStream(
@@ -57,17 +132,14 @@ def record(seconds=5, status_callback=None):
             time.sleep(seconds)
 
     except Exception as exc:
-        raise RuntimeError(f"Microphone recording failed: {exc}") from exc
+        raise RuntimeError(
+            f"Microphone recording failed: {exc}"
+        ) from exc
 
     if not chunks:
         raise RuntimeError("No audio was captured.")
 
-    audio = np.concatenate(chunks, axis=0).flatten()
-
-    if len(audio) == 0:
-        raise RuntimeError("The microphone returned empty audio.")
-
-    return audio
+    return np.concatenate(chunks, axis=0).flatten()
 
 
 def _get_model(size="base"):
@@ -88,7 +160,7 @@ def _get_model(size="base"):
 
 def transcribe(audio, language=None):
     """
-    Convert audio to text.
+    Convert audio into text.
 
     language:
         None = automatic detection

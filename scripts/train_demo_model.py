@@ -17,18 +17,18 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
-from src.config import MODELS_DIR, SELF_DIR
-from src.data_preprocessing import load_landmark_dataset, selected_lookup
+from src.config import MODELS_DIR, SELF_DIR, RECORDABLE_SIGNS
+from src.data_preprocessing import load_landmark_dataset, sanitize
 from src.feature_extraction import aggregate_features
 
 
 def load_self():
-    lookup = selected_lookup()
+    lookup = {sanitize(n): n for n in RECORDABLE_SIGNS}
     by_sign = {}
     for path in sorted(SELF_DIR.glob("*.npy")):
         key = path.stem.split("__")[0]
         if key in lookup:
-            by_sign.setdefault(lookup[key][1], []).append(np.load(path))
+            by_sign.setdefault(lookup[key], []).append(np.load(path))
     return by_sign
 
 
@@ -64,24 +64,28 @@ def main():
     rf.fit(aggregate_features(X_tr), y_tr, sample_weight=w_tr)
     acc = accuracy_score(y_te, rf.predict(aggregate_features(X_te)))
 
-    base_acc = float("nan")
+    base_acc = None
     base_path, labels_path = MODELS_DIR / "static_model.pkl", MODELS_DIR / "labels.json"
     if base_path.exists() and labels_path.exists():
         base, classes = joblib.load(base_path), json.loads(labels_path.read_text())
-        proba = base.predict_proba(aggregate_features(X_te))
-        # restrict the original 30-class model to the same signs so the comparison is fair
-        cols = [list(base.classes_).index(classes.index(s)) for s in signs]
-        base_acc = accuracy_score(y_te, np.argmax(proba[:, cols], axis=1))
+        shared = [s for s in signs if s in classes]       # signs the original model knows
+        mask = np.isin(y_te, [signs.index(s) for s in shared])
+        if len(shared) >= 2 and mask.any():
+            proba = base.predict_proba(aggregate_features(X_te[mask]))
+            cols = [list(base.classes_).index(classes.index(s)) for s in shared]
+            pred = np.array([signs.index(shared[i]) for i in np.argmax(proba[:, cols], axis=1)])
+            base_acc = float(accuracy_score(y_te[mask], pred))
 
     joblib.dump({"model": rf, "classes": signs}, MODELS_DIR / "demo_model.pkl")
     (MODELS_DIR / "demo_metrics.json").write_text(json.dumps({
-        "signs": signs, "n_test": int(len(y_te)), "baseline_accuracy": float(base_acc),
+        "signs": signs, "n_test": int(len(y_te)), "baseline_accuracy": base_acc,
         "personalised_accuracy": float(acc),
         "note": ("Test clips were recorded by the same person in the same session as the training clips, "
                  "so the personalised score is optimistic and is not a generalisation claim. "
                  "The original-model score shows how the INCLUDE-trained model behaves on this webcam."),
     }, indent=2))
-    print(f"\nOriginal INCLUDE-only model on your clips ({len(signs)} signs): {base_acc * 100:.0f}%")
+    print("\nOriginal INCLUDE-only model on your clips (signs it knows): "
+          + (f"{base_acc * 100:.0f}%" if base_acc is not None else "n/a"))
     print(f"Personalised model on your held-out clips:              {acc * 100:.0f}%")
     print("Saved models/demo_model.pkl. Restart the app and choose Model = Personalised.")
     return 0
